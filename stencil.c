@@ -1,17 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
-
+#include <mpi.h>
+#include <string.h>
 // Define output file name
 #define OUTPUT_FILE "stencil.pgm"
+#define NDIMS 1  /* setting the number of dimensions in the grid with a macro */
+#define MASTER 0
 
-void stencil(const int nx, const int ny, const int width, const int height,
-             float* restrict image, float* restrict tmp_image);
-void init_image(const int nx, const int ny, const int width, const int height,
-                float* restrict image, float* restrict tmp_image);
-void output_image(const char* file_name, const int nx, const int ny,
-                  const int width, const int height, float* restrict image);
-double wtime(void);
+#include "helper_functions.h"
 
 int main(int argc, char* argv[])
 {
@@ -21,41 +18,186 @@ int main(int argc, char* argv[])
     exit(EXIT_FAILURE);
   }
 
-  // Initiliase problem dimensions from command line arguments
-  int nx = atoi(argv[1]);
+  int nx = atoi(argv[1]); /* problem dimensions */
   int ny = atoi(argv[2]);
+  /* Add padding to the image to avoid out of range indexing at borders */
+  int rows = ny+2;
+  int cols = nx+2;
   int niters = atoi(argv[3]);
+  int periods[NDIMS];
+  int dims[NDIMS];
+  int reorder = 1;
+  int rank;
+  int size;
+  MPI_Comm CART_COMM_WORLD;
+  // Initalise periods and dims
+  for(int ii=0; ii<NDIMS; ii++){
+    periods[ii] = 0;
+    dims[ii]    = 0;
+  }
 
-  // we pad the outer edge of the image to avoid out of range address issues in
-  // stencil
-  int width = nx + 2;
-  int height = ny + 2;
 
-  // Allocate the image
-  float* restrict image = malloc(sizeof(float) * width * height);
-  float* restrict tmp_image = malloc(sizeof(float) * width * height);
+  // Allocate image
+  float *image        = malloc(sizeof(float) * rows * cols); /* rows & cols have padding */
+  float *tmp_image    = malloc(sizeof(float) * rows * cols); /* rows & cols have padding */
+  float *result_image = malloc(sizeof(float) * rows * cols); /* rows & cols have padding */
 
-  // Set the input image
-  init_image(nx, ny, width, height, image, tmp_image);
+  // Initialise image
+  init_images(nx, ny, cols, rows, image, tmp_image);
+  zero_image(cols,rows,result_image);
+  output_image("init.pgm",nx,ny,cols,rows,image);
+
+  MPI_Init(&argc, &argv);
+
+  MPI_Comm_size( MPI_COMM_WORLD, &size );
+
+  MPI_Dims_create(size, NDIMS, dims);
+  MPI_Cart_create(MPI_COMM_WORLD, NDIMS, dims, periods, reorder, &CART_COMM_WORLD);
+
+  MPI_Comm_rank( CART_COMM_WORLD, &rank );
+
+  // Initialise problem dimensions
+  int local_rows = ny+2; /* rows already includes padding */
+  int local_ny   = ny;
+  int local_nx   = calc_local_cols(nx, size, rank);
+  int local_cols = local_nx+2; /* with halo padding */
 
 
+  // Initialise local_image
+  float *local_image     = malloc(sizeof(float)*local_rows*local_cols);
+  float *local_tmp_image = malloc(sizeof(float)*local_rows*local_cols);
+
+  memset(local_image,    0,sizeof(float)*local_rows*local_cols);
+  memset(local_tmp_image,0,sizeof(float)*local_rows*local_cols);
+
+  int *displs = malloc(sizeof(int)*size);
+  int *counts = malloc(sizeof(int)*size);
+
+  calc_scatter_params(rows, nx, size, displs, counts);
+
+
+
+  MPI_Scatterv(
+              image+rows,counts,displs,
+              MPI_FLOAT,
+              local_image+local_rows,
+              counts[rank],
+              MPI_FLOAT,
+              MASTER,CART_COMM_WORLD);
+
+  float *sendbuf = malloc(sizeof(float)*local_rows*2);
+  float *recvbuf = malloc(sizeof(float)*local_rows*2);
+
+  memset(recvbuf,0,sizeof(float)*local_rows*2);   /* edge ranks must have 0 in recvbuf */
 
   // Call the stencil kernel
   double tic = wtime();
   for (int t = 0; t < niters; ++t) {
-    stencil(nx, ny, width, height, image, tmp_image);
-    stencil(nx, ny, width, height, tmp_image, image);
+
+      memcpy( /* SENDBUF 1 */
+        sendbuf,
+        local_image+local_rows,
+        sizeof(float)*local_rows);
+      memcpy(
+        sendbuf+local_rows,
+        local_image+local_rows*(local_cols-2),
+        sizeof(float)*local_rows);
+
+    MPI_Neighbor_alltoall(sendbuf, local_rows, MPI_FLOAT, 
+                          recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
+  
+    memcpy( /* RECVBUF 1 */
+      local_image,
+      recvbuf,
+      sizeof(float)*local_rows);
+    memcpy(
+      local_image+local_rows*(local_cols-1),
+      recvbuf+local_rows,
+      sizeof(float)*local_rows);
+
+    stencil(local_nx, local_ny, local_cols, local_rows, local_image, local_tmp_image);
+
+    memcpy( /* SENDBUF 2 */
+      sendbuf,
+      local_tmp_image+local_rows,
+      sizeof(float)*local_rows);
+    memcpy(
+      sendbuf+local_rows,
+      local_tmp_image+local_rows*(local_cols-2),
+      sizeof(float)*local_rows);
+
+    MPI_Neighbor_alltoall(sendbuf, local_rows, MPI_FLOAT, 
+                          recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
+
+    memcpy( /* RECVBUF 2 */
+      local_tmp_image,
+      recvbuf,
+      sizeof(float)*local_rows);
+    memcpy(
+      local_tmp_image+local_rows*(local_cols-1),
+      recvbuf+local_rows,
+      sizeof(float)*local_rows);
+
+    stencil(local_nx, local_ny, local_cols, local_rows, local_tmp_image, local_image);
   }
   double toc = wtime();
 
+
+  MPI_Barrier(CART_COMM_WORLD);
+  MPI_Gatherv(local_image+local_rows,local_nx*local_rows,MPI_FLOAT,result_image+rows,counts,displs,MPI_FLOAT,MASTER,CART_COMM_WORLD);
+  // MPI_Gatherv(local_image+local_rows,counts[rank],MPI_FLOAT,result_image,counts,displs,MPI_FLOAT,MASTER,CART_COMM_WORLD);
+
+
+
+
+
+  // MPI_Gather(local_image+local_rows,counts[rank],MPI_FLOAT,result_image,counts[rank],MPI_FLOAT,MASTER,CART_COMM_WORLD);
+  // if(rank==MASTER){
+  //   for(int j=0; j<cols; j++){
+  //     for(int i=0;i<rows;i++){
+  //       float im1 = image[i+rows*j];
+  //       float im2 = result_image[i+rows*j];
+  //       if ((im1-im2)!=0) {
+  //         printf("\n%f",result_image[i+rows*j]);
+  //         printf("\n%f",image[i+rows*j]);
+  //       }
+  //       printf("%f----%f\n",image[i+rows*j],result_image[i+rows*j]);
+  //     }
+  //   }
+  // }
+  // if (rank==MASTER){
+  //   for(ii=0;ii<rows*cols;ii++){
+  //     if(ii%rows==0) printf("==\n");
+  //     printf(".%d",(int)result_image[ii]);
+  //   }
+  //   printf("\n============================\n");
+  //   for(ii=0;ii<rows*cols;ii++){
+  //     if(ii%rows==0) printf("==\n");
+  //     printf(".%d",(int)image[ii]);
+  //   }
+
+  // }
+
+  // memcpy(tmp_image+rows,result_image,sizeof(float)*rows*cols);
+
+
+
   // Output
-  printf("------------------------------------\n");
-  printf(" runtime: %lf s\n", toc - tic);
-  printf("------------------------------------\n");
-
-  output_image(OUTPUT_FILE, nx, ny, width, height, image);
-  free(image);
-  free(tmp_image);
+  if (rank == MASTER){
+    printf("\n------------------------------------\n");
+    printf(" runtime: %lf s\n", toc - tic);
+    printf("------------------------------------\n");
+    output_image("stencil.pgm",nx,ny,cols,rows,result_image);
+    // output_image("stencil.pgm",nx,ny,cols,rows,tmp_image);
+  }
+  MPI_Finalize();
+  // free(image);
+  // free(tmp_image);
+  // free(local_image);
+  // free(result_image);
+  // free(counts);
+  // free(displs);
+  // free(sendbuf);
+  // free(recvbuf);
+  exit(EXIT_SUCCESS);
 }
-
-
