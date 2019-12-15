@@ -20,6 +20,7 @@ void calc_scatter_params(const int rows,const int cols,const int size, int *disp
 
 void stencil(const int nx, const int ny, const int width, const int height, float* image, float* tmp_image)
 {
+  // #pragma omp parallel for collapse(2)
   for (int i = 1; i < nx + 1; ++i) {
     #pragma vector aligned
     for (int j = 1; j < ny + 1; ++j){
@@ -170,3 +171,4 @@ double wtime(void)
   gettimeofday(&tv, NULL);
   return tv.tv_sec + tv.tv_usec * 1e-6;
 }
+

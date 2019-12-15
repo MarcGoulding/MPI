@@ -90,22 +90,36 @@ int main(int argc, char* argv[])
 
   memset(recvbuf,0,sizeof(float)*local_rows*2);   /* edge ranks must have 0 in recvbuf */
 
+  /* Find neighbor ID's for MPI_Senrecv */
+  int tag=0; MPI_Status status;
+  int  left_neighbor;
+  int right_neighbor;
+  MPI_Cart_shift(CART_COMM_WORLD,0,1, &left_neighbor, &right_neighbor);
+  //check non-periodic dimension's edge cases
+  if( left_neighbor<0 ||  left_neighbor>=size)  left_neighbor = MPI_PROC_NULL;
+  if(right_neighbor<0 || right_neighbor>=size) right_neighbor = MPI_PROC_NULL;
+  MPI_Barrier(CART_COMM_WORLD);
+
   // Call the stencil kernel
   double tic = wtime();
   for (int t = 0; t < niters; ++t) {
 
-      memcpy( /* SENDBUF 1 */
-        sendbuf,
-        local_image+local_rows,
-        sizeof(float)*local_rows);
-      memcpy(
-        sendbuf+local_rows,
-        local_image+local_rows*(local_cols-2),
-        sizeof(float)*local_rows);
+    memcpy( /* SENDBUF 1 */
+      sendbuf,
+      local_image+local_rows,
+      sizeof(float)*local_rows);
+    memcpy(
+      sendbuf+local_rows,
+      local_image+local_rows*(local_cols-2),
+      sizeof(float)*local_rows);
 
-    MPI_Neighbor_alltoall(sendbuf, local_rows, MPI_FLOAT, 
-                          recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
-  
+    // MPI_Neighbor_alltoall(sendbuf, local_rows, MPI_FLOAT, 
+    //                       recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
+    MPI_Sendrecv(sendbuf,local_rows,MPI_FLOAT,left_neighbor,tag,
+    			recvbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag,CART_COMM_WORLD,&status);
+    MPI_Sendrecv(sendbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag, 
+    			recvbuf,local_rows,MPI_FLOAT,left_neighbor,tag,CART_COMM_WORLD,&status);
+
     memcpy( /* RECVBUF 1 */
       local_image,
       recvbuf,
@@ -126,8 +140,12 @@ int main(int argc, char* argv[])
       local_tmp_image+local_rows*(local_cols-2),
       sizeof(float)*local_rows);
 
-    MPI_Neighbor_alltoall(sendbuf, local_rows, MPI_FLOAT, 
-                          recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
+    // MPI_Neighbor_alltoall( sendbuf, local_rows, MPI_FLOAT, 
+                              // recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
+    MPI_Sendrecv(sendbuf,local_rows,MPI_FLOAT,left_neighbor,tag,
+    			recvbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag,CART_COMM_WORLD,&status);
+    MPI_Sendrecv(sendbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag, 
+    			recvbuf,local_rows,MPI_FLOAT,left_neighbor,tag,CART_COMM_WORLD,&status);
 
     memcpy( /* RECVBUF 2 */
       local_tmp_image,
@@ -145,41 +163,6 @@ int main(int argc, char* argv[])
 
   MPI_Barrier(CART_COMM_WORLD);
   MPI_Gatherv(local_image+local_rows,local_nx*local_rows,MPI_FLOAT,result_image+rows,counts,displs,MPI_FLOAT,MASTER,CART_COMM_WORLD);
-  // MPI_Gatherv(local_image+local_rows,counts[rank],MPI_FLOAT,result_image,counts,displs,MPI_FLOAT,MASTER,CART_COMM_WORLD);
-
-
-
-
-
-  // MPI_Gather(local_image+local_rows,counts[rank],MPI_FLOAT,result_image,counts[rank],MPI_FLOAT,MASTER,CART_COMM_WORLD);
-  // if(rank==MASTER){
-  //   for(int j=0; j<cols; j++){
-  //     for(int i=0;i<rows;i++){
-  //       float im1 = image[i+rows*j];
-  //       float im2 = result_image[i+rows*j];
-  //       if ((im1-im2)!=0) {
-  //         printf("\n%f",result_image[i+rows*j]);
-  //         printf("\n%f",image[i+rows*j]);
-  //       }
-  //       printf("%f----%f\n",image[i+rows*j],result_image[i+rows*j]);
-  //     }
-  //   }
-  // }
-  // if (rank==MASTER){
-  //   for(ii=0;ii<rows*cols;ii++){
-  //     if(ii%rows==0) printf("==\n");
-  //     printf(".%d",(int)result_image[ii]);
-  //   }
-  //   printf("\n============================\n");
-  //   for(ii=0;ii<rows*cols;ii++){
-  //     if(ii%rows==0) printf("==\n");
-  //     printf(".%d",(int)image[ii]);
-  //   }
-
-  // }
-
-  // memcpy(tmp_image+rows,result_image,sizeof(float)*rows*cols);
-
 
 
   // Output
@@ -188,11 +171,10 @@ int main(int argc, char* argv[])
     printf(" runtime: %lf s\n", toc - tic);
     printf("------------------------------------\n");
     output_image("stencil.pgm",nx,ny,cols,rows,result_image);
-    // output_image("stencil.pgm",nx,ny,cols,rows,tmp_image);
   }
   MPI_Finalize();
-  // free(image);
-  // free(tmp_image);
+  free(image);
+  free(tmp_image);
   // free(local_image);
   // free(result_image);
   // free(counts);
