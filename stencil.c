@@ -104,57 +104,29 @@ int main(int argc, char* argv[])
   double tic = wtime();
   for (int t = 0; t < niters; ++t) {
 
-    memcpy( /* SENDBUF 1 */
-      sendbuf,
-      local_image+local_rows,
-      sizeof(float)*local_rows);
-    memcpy(
-      sendbuf+local_rows,
-      local_image+local_rows*(local_cols-2),
-      sizeof(float)*local_rows);
-
-    // MPI_Neighbor_alltoall(sendbuf, local_rows, MPI_FLOAT, 
-    //                       recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
-    MPI_Sendrecv(sendbuf,local_rows,MPI_FLOAT,left_neighbor,tag,
-    			recvbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag,CART_COMM_WORLD,&status);
-    MPI_Sendrecv(sendbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag, 
-    			recvbuf,local_rows,MPI_FLOAT,left_neighbor,tag,CART_COMM_WORLD,&status);
-
-    memcpy( /* RECVBUF 1 */
-      local_image,
-      recvbuf,
-      sizeof(float)*local_rows);
-    memcpy(
-      local_image+local_rows*(local_cols-1),
-      recvbuf+local_rows,
-      sizeof(float)*local_rows);
+  	// left
+    MPI_Sendrecv(local_image+local_rows,local_rows,MPI_FLOAT,left_neighbor,tag,
+    			local_image+local_rows*(local_cols-1),local_rows,MPI_FLOAT,right_neighbor,tag,CART_COMM_WORLD,&status);
+    // right
+    MPI_Sendrecv(local_image+local_rows*(local_cols-2),local_rows,MPI_FLOAT,right_neighbor,tag, 
+    			local_image,local_rows,MPI_FLOAT,left_neighbor,tag,CART_COMM_WORLD,&status);
 
     stencil(local_nx, local_ny, local_cols, local_rows, local_image, local_tmp_image);
+   //  for (int i = 1; i < nx + 1; ++i) {
+	  //   #pragma vector aligned
+	  //   for (int j = 1; j < ny + 1; ++j){
+	  //     tmp_image[j + i * height] =  image[j + i * height] * 0.6f
+	  //     + (image[j - 1 + i * height]
+	  //     +  image[j + 1 + i * height]
+	  //     +  image[j + (i - 1) * height]
+	  //     +  image[j + (i + 1) * height]) * 0.1f;
+	  //   }
+  	// }
 
-    memcpy( /* SENDBUF 2 */
-      sendbuf,
-      local_tmp_image+local_rows,
-      sizeof(float)*local_rows);
-    memcpy(
-      sendbuf+local_rows,
-      local_tmp_image+local_rows*(local_cols-2),
-      sizeof(float)*local_rows);
-
-    // MPI_Neighbor_alltoall( sendbuf, local_rows, MPI_FLOAT, 
-                              // recvbuf, local_rows, MPI_FLOAT, CART_COMM_WORLD);
-    MPI_Sendrecv(sendbuf,local_rows,MPI_FLOAT,left_neighbor,tag,
-    			recvbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag,CART_COMM_WORLD,&status);
-    MPI_Sendrecv(sendbuf+local_rows,local_rows,MPI_FLOAT,right_neighbor,tag, 
-    			recvbuf,local_rows,MPI_FLOAT,left_neighbor,tag,CART_COMM_WORLD,&status);
-
-    memcpy( /* RECVBUF 2 */
-      local_tmp_image,
-      recvbuf,
-      sizeof(float)*local_rows);
-    memcpy(
-      local_tmp_image+local_rows*(local_cols-1),
-      recvbuf+local_rows,
-      sizeof(float)*local_rows);
+    MPI_Sendrecv(local_tmp_image+local_rows,local_rows,MPI_FLOAT,left_neighbor,tag,
+    			local_tmp_image+local_rows*(local_cols-1),local_rows,MPI_FLOAT,right_neighbor,tag,CART_COMM_WORLD,&status);
+    MPI_Sendrecv(local_tmp_image+local_rows*(local_cols-2),local_rows,MPI_FLOAT,right_neighbor,tag, 
+    			local_tmp_image,local_rows,MPI_FLOAT,left_neighbor,tag,CART_COMM_WORLD,&status);
 
     stencil(local_nx, local_ny, local_cols, local_rows, local_tmp_image, local_image);
   }

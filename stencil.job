@@ -24,4 +24,9 @@ echo
 export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi.so
 
 # Run the executable
+echo "1024"
+srun ./stencil 1024 1024 100
+echo "4096"
+srun ./stencil 4096 4096 100
+echo "8000"
 srun ./stencil 8000 8000 100
