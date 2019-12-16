@@ -1,7 +1,7 @@
 Running on host compute084.bc4.acrc.priv
-Time is Mon Dec 16 05:21:01 GMT 2019
+Time is Mon Dec 16 05:54:34 GMT 2019
 Directory is /mnt/storage/home/mg17752/mpi/intro-hpc-stencil
-Slurm job ID is 2918279
+Slurm job ID is 2918293
 
 This job runs on the following machines:
 compute[084,086]
@@ -9,15 +9,15 @@ compute[084,086]
 8000
 
 ------------------------------------
- runtime: 1.006161 s
+ runtime: 0.971624 s
 ------------------------------------
 4096
 
 ------------------------------------
- runtime: 0.129280 s
+ runtime: 0.127441 s
 ------------------------------------
 1024
 
 ------------------------------------
- runtime: 0.014689 s
+ runtime: 0.029691 s
 ------------------------------------

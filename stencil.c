@@ -66,9 +66,9 @@ int main(int argc, char* argv[])
   // Initialise local_image 
   float *local_image     = malloc(sizeof(float)*local_rows*local_cols); 
   float *local_tmp_image = malloc(sizeof(float)*local_rows*local_cols); 
- 
-  memset(local_image,    0,sizeof(float)*local_rows*local_cols); 
-  memset(local_tmp_image,0,sizeof(float)*local_rows*local_cols); 
+  
+  zero_image(local_cols,local_rows,local_image);
+  zero_image(local_cols,local_rows,local_tmp_image);
  
   int *displs = malloc(sizeof(int)*size); 
   int *counts = malloc(sizeof(int)*size); 
@@ -88,17 +88,55 @@ int main(int argc, char* argv[])
               MASTER,CART_COMM_WORLD); 
  
 
+
+  MPI_Request request;
+  MPI_Status   status;
+  int i,j;
   // Call the stencil kernel 
   MPI_Barrier(CART_COMM_WORLD);
   double tic = wtime(); 
   for (int t = 0; t < niters; ++t) { 
  
-    MPI_Neighbor_alltoallv(local_image,halo_counts, halo_send_displs, MPI_FLOAT,
-                          local_image,halo_counts,halo_recv_displs,MPI_FLOAT,CART_COMM_WORLD);
-    stencil(local_nx,local_ny,local_cols,local_rows,local_image,local_tmp_image);
-    MPI_Neighbor_alltoallv(local_tmp_image,halo_counts,halo_send_displs,MPI_FLOAT,
-                          local_tmp_image,halo_counts,halo_recv_displs,MPI_FLOAT,CART_COMM_WORLD);
-    stencil(local_nx,local_ny,local_cols,local_rows,local_tmp_image,local_image);
+    MPI_Ineighbor_alltoallv(local_image,halo_counts, halo_send_displs, MPI_FLOAT,
+                            local_image,halo_counts,halo_recv_displs,MPI_FLOAT,CART_COMM_WORLD,&request);
+    stencil(local_nx-2,local_ny,local_cols,local_rows,local_image+local_rows,local_tmp_image+local_rows);
+    MPI_Waitall(1,&request,&status);
+    #pragma vector aligned
+    for (j = 1; j < ny + 1; ++j){
+      local_tmp_image[j + local_rows] =  local_image[j + local_rows] * 0.6f
+      + (local_image[j - 1 + local_rows]
+      +  local_image[j + 1 + local_rows]
+      +  local_image[j + 2 * local_rows]
+      +  local_image[j]) * 0.1f;
+    }
+    #pragma vector aligned
+    for (j = 1; j < ny + 1; ++j){
+      local_tmp_image[j + (local_cols-2) * local_rows] =  local_image[j + (local_cols-2) * local_rows] * 0.6f
+      + (local_image[j - 1 + (local_cols-2) * local_rows]
+      +  local_image[j + 1 + (local_cols-2) * local_rows]
+      +  local_image[j + (local_cols-3) * local_rows]
+      +  local_image[j + (local_cols-1) * local_rows]) * 0.1f;
+    }
+    MPI_Ineighbor_alltoallv(local_tmp_image,halo_counts,halo_send_displs,MPI_FLOAT,
+                            local_tmp_image,halo_counts,halo_recv_displs,MPI_FLOAT,CART_COMM_WORLD,&request);
+    stencil(local_nx-2,local_ny,local_cols,local_rows,local_tmp_image+local_rows,local_image+local_rows);
+    MPI_Waitall(1,&request,&status);
+    #pragma vector aligned
+    for (j = 1; j < ny + 1; ++j){
+      local_image[j + local_rows] =  local_tmp_image[j + local_rows] * 0.6f
+      + (local_tmp_image[j - 1 + local_rows]
+      +  local_tmp_image[j + 1 + local_rows]
+      +  local_tmp_image[j + 2 * local_rows]
+      +  local_tmp_image[j]) * 0.1f;
+    }
+    #pragma vector aligned
+    for (j = 1; j < ny + 1; ++j){
+      local_image[j + (local_cols-2) * local_rows] =  local_tmp_image[j + (local_cols-2) * local_rows] * 0.6f
+      + (local_tmp_image[j - 1 + (local_cols-2) * local_rows]
+      +  local_tmp_image[j + 1 + (local_cols-2) * local_rows]
+      +  local_tmp_image[j + (local_cols-3) * local_rows]
+      +  local_tmp_image[j + (local_cols-1) * local_rows]) * 0.1f;
+    }
   }
   double toc = wtime(); 
  
