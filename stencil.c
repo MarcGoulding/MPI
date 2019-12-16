@@ -10,6 +10,8 @@
  
 #include "helper_functions.h" 
  
+void stencil(const int nx, const int ny, const int width, const int height, float* image, float* tmp_image);
+
 int main(int argc, char* argv[]) 
 { 
   // Check usage 
@@ -163,3 +165,18 @@ int main(int argc, char* argv[])
   // free(recvbuf); 
   exit(EXIT_SUCCESS); 
 } 
+
+void stencil(const int nx, const int ny, const int width, const int height, float* image, float* tmp_image)
+{
+  #pragma omp parallel for shared(image, tmp_image, nx, ny) schedule(dynamic, 10)
+  for (int i = 1; i < nx + 1; ++i) {
+    #pragma vector aligned
+    for (int j = 1; j < ny + 1; ++j){
+      tmp_image[j + i * height] =  image[j + i * height] * 0.6f
+      + (image[j - 1 + i * height]
+      +  image[j + 1 + i * height]
+      +  image[j + (i - 1) * height]
+      +  image[j + (i + 1) * height]) * 0.1f;
+    }
+  }
+}

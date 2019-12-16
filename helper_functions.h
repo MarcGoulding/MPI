@@ -18,20 +18,6 @@ void calc_scatter_params(const int rows,const int cols,const int size, int *disp
   }
 }
 
-void stencil(const int nx, const int ny, const int width, const int height, float* image, float* tmp_image)
-{
-  // #pragma omp parallel for collapse(2)
-  for (int i = 1; i < nx + 1; ++i) {
-    #pragma vector aligned
-    for (int j = 1; j < ny + 1; ++j){
-      tmp_image[j + i * height] =  image[j + i * height] * 0.6f
-      + (image[j - 1 + i * height]
-      +  image[j + 1 + i * height]
-      +  image[j + (i - 1) * height]
-      +  image[j + (i + 1) * height]) * 0.1f;
-    }
-  }
-}
 // ORIGINAL:
 // void stencil(const int nx, const int ny, const int width, const int height,
 //              float* image, float* tmp_image)

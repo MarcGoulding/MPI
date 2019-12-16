@@ -21,12 +21,21 @@ echo "$SLURM_JOB_NODELIST" | uniq
 echo
 
 # Enable using `srun` with Intel MPI
-export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi.so
+unset I_MPI_PMI_LIBRARY
+export OMP_NUM_THREADS=1
+export OMP_PROC_BIND=close
 
 # Run the executable
 echo "8000"
-srun ./stencil 8000 8000 100
+mpirun -n 56 ./stencil 8000 8000 100
 echo "4096"
-srun ./stencil 4096 4096 100
+mpirun -n 56 ./stencil 4096 4096 100
 echo "1024"
-srun ./stencil 1024 1024 100
+mpirun -n 56 ./stencil 1024 1024 100
+
+echo "8000 several times"
+mpirun -n 56 ./stencil 8000 8000 100
+mpirun -n 56 ./stencil 8000 8000 100
+mpirun -n 56 ./stencil 8000 8000 100
+mpirun -n 56 ./stencil 8000 8000 100
+
